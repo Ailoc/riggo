@@ -36,7 +36,7 @@ func (e *AgentEngine) Run(ctx context.Context, userPrompt string) error {
 	contextHistory := []schema.Message{
 		{
 			Role:    schema.RoleSystem,
-			Content: "You are go-tiny-claw, an expert coding assistant. You have full access to tools in the workspace.",
+			Content: "You are riggo, an expert coding assistant. You have full access to tools in the workspace.",
 		},
 		{
 			Role:    schema.RoleUser,

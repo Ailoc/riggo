@@ -40,7 +40,7 @@ func main() {
 	registry.Register(bashTool)
 
 	// 5. 实例化核心引擎，由于任务简单，我们关闭思考阶段 (EnableThinking = false) 以加快速度
-	eng := engine.NewAgentEngine(llmProvider, registry, workDir, false)
+	eng := engine.NewAgentEngine(llmProvider, registry, workDir, true)
 
 	// 6. 下发一个必须通过真实工具才能完成的任务
 	prompt := ` 请帮我执行以下操作：
