@@ -5,6 +5,7 @@ import (
 	"context"
 	"fmt"
 	"log"
+	"sync"
 
 	"github.com/Ailoc/riggo/internal/provider"
 	"github.com/Ailoc/riggo/internal/schema"
@@ -29,7 +30,7 @@ func NewAgentEngine(p provider.LLMProvider, r tools.Registry, workDir string, en
 
 // internal/engine/loop.go (续)
 
-func (e *AgentEngine) Run(ctx context.Context, userPrompt string) error {
+func (e *AgentEngine) Run(ctx context.Context, userPrompt string, repoter Reporter) error {
 	log.Printf("[Engine] 引擎启动，锁定工作区: %s\n", e.WorkDir)
 	log.Printf("[Engine] 慢思考模式 (Thinking Phase): %v\n", e.EnableThinking)
 
@@ -57,6 +58,9 @@ func (e *AgentEngine) Run(ctx context.Context, userPrompt string) error {
 		// Phase 1: 慢思考阶段 (Thinking) - 剥夺工具，强制规划
 		// ====================================================================
 		if e.EnableThinking {
+			if repoter != nil {
+				repoter.OnThinking(ctx)
+			}
 			log.Println("[Engine][Phase 1] 剥夺工具访问权，强制进入慢思考与规划阶段...")
 
 			// 核心机制：传入的 availableTools 为 nil！
@@ -87,38 +91,70 @@ func (e *AgentEngine) Run(ctx context.Context, userPrompt string) error {
 
 		contextHistory = append(contextHistory, *actionResp)
 
-		if actionResp.Content != "" {
+		if actionResp.Content != "" && repoter != nil {
+			repoter.OnMessage(ctx, actionResp.Content)
 			fmt.Printf("🤖 [对外回复]: %s\n", actionResp.Content)
 		}
 
 		// ====================================================================
-		// 退出与执行逻辑 (与上一讲保持一致)
+		// 退出与执行逻辑
 		// ====================================================================
 		if len(actionResp.ToolCalls) == 0 {
 			log.Println("[Engine] 模型未请求调用工具，任务宣告完成。")
 			break
 		}
 
-		log.Printf("[Engine] 模型请求调用 %d 个工具...\n", len(actionResp.ToolCalls))
+		// log.Printf("[Engine] 模型请求调用 %d 个工具...\n", len(actionResp.ToolCalls))
+		log.Printf("[Engine] 模型请求并发调用 %d 个工具...\n", len(actionResp.ToolCalls))
 
-		for _, toolCall := range actionResp.ToolCalls {
-			log.Printf("  -> 🛠️ 执行工具: %s, 参数: %s\n", toolCall.Name, string(toolCall.Arguments))
+		// 1. 预分配一个固定长度的切片，用于安全地存放各个并发工具的执行结果（Observation）
+		// // 长度与 ToolCalls 的数量完全一致
+		observationMsgs := make([]schema.Message, len(actionResp.ToolCalls))
 
-			result := e.registry.Execute(ctx, toolCall)
+		// 2. 声明 WaitGroup 用于阻塞等待所有协程完成
+		var wg sync.WaitGroup
 
-			if result.IsError {
-				log.Printf("  -> ❌ 工具执行报错: %s\n", result.Output)
-			} else {
-				log.Printf("  -> ✅ 工具执行成功 (返回 %d 字节)\n", len(result.Output))
-			}
+		for i, toolCall := range actionResp.ToolCalls {
+			wg.Add(1) // 增加计数器
 
-			// 将工具执行的观察结果追加到 Context，准备进入下一轮
-			observationMsg := schema.Message{
-				Role:       schema.RoleUser,
-				Content:    result.Output,
-				ToolCallID: toolCall.ID,
-			}
-			contextHistory = append(contextHistory, observationMsg)
+			go func(idx int, call schema.ToolCall) {
+				defer wg.Done()
+
+				if repoter != nil {
+					repoter.OnToolCall(ctx, call.Name, string(call.Arguments))
+				}
+
+				log.Printf(" -> [Go-%d] 🛠️ 触发并行执行: %s\n", idx, call.Name)
+
+				result := e.registry.Execute(ctx, call)
+
+				if repoter != nil {
+					displayOutput := result.Output
+					if len(displayOutput) > 200 {
+						displayOutput = displayOutput[:200] + "...(已截断)"
+					}
+					repoter.OnToolResult(ctx, call.Name, displayOutput, result.IsError)
+				}
+
+				if result.IsError {
+					log.Printf(" -> [Go-%d] ❌ 工具执行报错: %s\n", idx, result.Output)
+				} else {
+					log.Printf(" -> [Go-%d] ✅ 工具执行成功 (返回 %d 字节)\n", idx, len(result.Output))
+				}
+
+				obsMsg := schema.Message{
+					Role:       schema.RoleUser,
+					Content:    result.Output,
+					ToolCallID: call.ID,
+				}
+				observationMsgs[idx] = obsMsg
+			}(i, toolCall)
+		}
+
+		wg.Wait()
+		log.Println("[Engine] 所有并发工具执行完毕，开始聚合观察结果 (Observation)...")
+		for _, obs := range observationMsgs {
+			contextHistory = append(contextHistory, obs)
 		}
 	}
 

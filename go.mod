@@ -8,6 +8,7 @@ require (
 	github.com/buger/jsonparser v1.1.2 // indirect
 	github.com/invopop/jsonschema v0.13.0 // indirect
 	github.com/joho/godotenv v1.5.1 // indirect
+	github.com/larksuite/oapi-sdk-go/v3 v3.7.5 // indirect
 	github.com/mailru/easyjson v0.7.7 // indirect
 	github.com/openai/openai-go/v3 v3.32.0 // indirect
 	github.com/tidwall/gjson v1.18.0 // indirect

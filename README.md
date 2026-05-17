@@ -7,3 +7,5 @@
 ## 2. 极简主义与YOLO (You Only Live Once)——大量工具带来的上下文膨胀问题
 如果一个agent运行时附带了很多的工具，往往会带来上下文膨胀的问题，消耗token，还使得大模型的注意力很分散，维护这些工具也很困难。
 - 解决：使用简单的几个工具，如write_file, read_file, bash工具，在workDir中给予agent最高的bash权限
+## 3. 支持多级匹配的Edit工具
+## 4. Parallel Tool Calling
