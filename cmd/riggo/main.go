@@ -2,16 +2,17 @@
 package main
 
 import (
+	"context"
 	"log"
-	"net/http"
 	"os"
+	"os/signal"
+	"syscall"
 
 	"github.com/Ailoc/riggo/internal/engine"
 	"github.com/Ailoc/riggo/internal/feishu"
 	"github.com/Ailoc/riggo/internal/provider"
 	"github.com/Ailoc/riggo/internal/tools"
 	"github.com/joho/godotenv"
-	"github.com/larksuite/oapi-sdk-go/v3/core/httpserverext"
 )
 
 func main() {
@@ -43,15 +44,20 @@ func main() {
 	// 5. 实例化核心引擎，由于任务简单，我们关闭思考阶段 (EnableThinking = false) 以加快速度
 	eng := engine.NewAgentEngine(llmProvider, registry, workDir, true)
 
-	// 2. 初始化飞书 Bot 调度器
-	bot := feishu.NewFeishuBot(eng)
-	handler := httpserverext.NewEventHandlerFunc(bot.GetEventDispatcher())
-	// 3. 注册路由并启动 HTTP 服务
-	http.HandleFunc("/webhook/event", handler)
-	port := ":48080"
-	log.Printf("🚀 go-tiny-claw 飞书服务端已启动，正在监听 %s 端口\n", port)
-	err := http.ListenAndServe(port, nil)
-	if err != nil {
-		log.Fatalf("服务器启动失败: %v", err)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	sigChan := make(chan os.Signal, 1)
+	signal.Notify(sigChan, os.Interrupt, syscall.SIGTERM)
+
+	// 飞书模式：有环境变量时后台启动
+	if os.Getenv("FEISHU_APP_ID") != "" && os.Getenv("FEISHU_APP_SECRET") != "" {
+		bot := feishu.NewFeishuBot(eng)
+		go func() {
+			log.Println("🚀 飞书 WebSocket 长连接模式启动...")
+			if err := bot.StartWebSocket(ctx); err != nil {
+				log.Printf("❌ WebSocket 连接失败: %v\n", err)
+			}
+		}()
 	}
 }
